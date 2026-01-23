@@ -5,7 +5,9 @@
   "description": "Fix for shitty IAM SAML cookies",
   "permissions": [
     "cookies",
-    "storage"
+    "storage",
+    "webRequest",
+    "webRequestBlocking"
   ],
   "host_permissions": [
     "<all_urls>"

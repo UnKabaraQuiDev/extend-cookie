@@ -1,60 +1,125 @@
-browser.cookies.onChanged.addListener(async change => {
-  if (change.removed) return;
+// intercept all responses with Set-Cookie headers
+browser.webRequest.onHeadersReceived.addListener(
+  async details => {
+    const { domains = {} } = await browser.storage.local.get("domains");
+    const now = Math.floor(Date.now() / 1000);
 
-  const cookie = change.cookie;
-  const domain = cookie.domain.replace(/^\./, "");
+    const newHeaders = [];
 
-  const { domains = {} } = await browser.storage.local.get("domains");
-  const ruleEntry = matchRuleForDomain(domain, domains);
-  if (!ruleEntry) return;
+    const skipNames = [];
 
-  const rule = ruleEntry;
-  if (!rule.enabled) return;
+    for (const header of details.responseHeaders) {
+      if (header.name.toLowerCase() !== "set-cookie") {
+        newHeaders.push(header);
+        continue;
+      }
+      console.log(header);
 
-  const cookieOverride = rule.cookies?.[cookie.name];
-  if (cookieOverride && cookieOverride.enabled === false) return;
+      const cookies = header.value.split(/\r?\n/);
+      console.log(cookies);
 
-  const duration = cookieOverride?.duration ?? rule.duration;
-  const now = Math.floor(Date.now() / 1000);
+      for (const cookieStr of cookies) {
+        console.log(cookieStr);
+        // parse cookie name, value, and attributes
+        const m = cookieStr.match(/^([^=]+)=([^;]*)(.*)$/);
+        if (!m) continue;
 
-  // compute current remaining lifetime
-  const currentExpiration = cookie.expirationDate || now;
-  const remaining = currentExpiration - now;
+        const cookieName = m[1].trim();
+        const cookieValue = m[2].trim();
+        let attrs = m[3] || "";
 
-  // only extend if remaining < desired duration
-  if (remaining >= duration) {
-    console.log("skipping", currentExpiration, duration, remaining, cookie.name, cookie.value, cookie);
-    return;
-  }else {
-    console.log("setting", currentExpiration, duration, remaining, cookie.name, cookie.value, cookie);
-  }
+        // get domain from attributes or fallback to request URL
+        const domainMatch = attrs.match(/;\s*Domain=([^;]+)/i);
+        const cookieDomain = domainMatch ? domainMatch[1].replace(/^\./, "") : new URL(details.url).hostname;
 
-  const newExpiration = now + duration;
+        const ruleEntry = matchRuleForDomain(cookieDomain, domains);
+        if (!ruleEntry) {
+          console.log("No rule", cookieName);
+          newHeaders.push({ name: "Set-Cookie", value: cookieStr });
+          continue;
+        }
 
-  // overwrite cookie
-  const nCookie = cookie;
-  nCookie.expirationDate = newExpiration;
-  browser.cookies.set(nCookie);
+        const rule = ruleEntry;
+        if (!rule.enabled) {
+          console.log("Rule disabled", cookieName);
+          newHeaders.push({ name: "Set-Cookie", value: cookieStr });
+          continue;
+        }
 
-  // log the override
-  const { logs = [] } = await browser.storage.local.get("logs");
-  const timestamp = new Date().toISOString();
-  const previousDur = remaining > 0 ? remaining : 0;
+        const cookieOverride = rule.cookies?.[cookieName];
+        if (cookieOverride && cookieOverride.enabled === false) {
+          console.log("Single cookie override refused", cookieName);
+          newHeaders.push({ name: "Set-Cookie", value: cookieStr });
+          continue;
+        }
 
-  logs.push({
-    timestamp,
-    domain,
-    cookie: cookie.name,
-    previousDuration: previousDur,
-    overwrittenDuration: duration
-  });
+        const duration = cookieOverride?.duration ?? rule.duration;
 
-  if (logs.length > 25) logs.splice(0, logs.length - 25); // keep last 25
+        // compute current remaining lifetime
+        let remaining = 0;
+        const maxAgeMatch = attrs.match(/;\s*Max-Age=([^;]+)/i);
+        const expiresMatch = attrs.match(/;\s*Expires=([^;]+)/i);
 
-  await browser.storage.local.set({ logs });
-});
+        console.log(cookieName, maxAgeMatch, expiresMatch);
 
+        if (maxAgeMatch) {
+          remaining = parseInt(maxAgeMatch[1], 10);
+        } else if (expiresMatch) {
+          const expDate = new Date(expiresMatch[1]);
+          remaining = Math.floor(expDate.getTime() / 1000) - now;
+        } else {
+          console.log("no timeout", cookieName);
+          newHeaders.push({name: "Set-Cookie", value: cookieStr});
+          continue;
+        }
 
+        // only override if remaining < desired duration
+        if (remaining >= duration) {
+          console.log("Long enough", cookieName);
+          newHeaders.push({ name: "Set-Cookie", value: cookieStr });
+          continue;
+        }
+
+        if(skipNames.includes(cookieName)) {
+          console.log("skipping", cookieName);
+          continue;
+        }else {
+          console.log("first", cookieName);
+          skipNames.push(cookieName);
+        }
+
+        //if (cookieName == ""undefined"") {
+          // rebuild cookie with extended Max-Age
+          attrs = attrs.replace(/;\s*Max-Age=[^;]+/i, "");
+          attrs = attrs.replace(/;\s*Expires=[^;]+/i, "");
+
+          const newCookieStr = `${cookieName}=${cookieValue}${attrs}; Max-Age=${duration}`;
+          newHeaders.push({ name: "Set-Cookie", value: newCookieStr });
+        // }else {
+        //   newHeaders.push({ name: "Set-Cookie", value: cookieStr });
+        // }
+
+        // log override
+        // const { logs = [] } = await browser.storage.local.get("logs");
+        // logs.push({
+        //   timestamp: new Date().toISOString(),
+        //   domain: cookieDomain,
+        //   cookie: cookieName,
+        //   previousDuration: remaining,
+        //   overwrittenDuration: duration
+        // });
+        // if (logs.length > 25) logs.splice(0, logs.length - 25);
+        // await browser.storage.local.set({ logs });
+      }
+    }
+
+    console.log("new:", newHeaders);
+
+    return { responseHeaders: newHeaders };
+  },
+  { urls: ["<all_urls>"] },
+  ["blocking", "responseHeaders"]
+);
 
 function matchRuleForDomain(cookieDomain, domains) {
   const entries = Object.entries(domains);
