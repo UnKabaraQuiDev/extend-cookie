@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <style>
+      body {
+        font-family: sans-serif;
+        min-width: 300px;
+      }
+      .row {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 6px;
+        align-items: center;
+      }
+      input[type="text"] {
+        flex: 1;
+      }
+      .duration-row input[type="number"] {
+        width: 40px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="list"></div>
+    <button id="add">Add domain</button>
+
+    <h3>Last 25 Overrides</h3>
+    <div id="logs" style="max-height:200px;overflow:auto;font-family:monospace;"></div>
+    
+    <template id="duration-template">
+        <div class="duration-row">
+            <label>
+            Days
+            <input type="number" class="days" min="0" value="0">
+            </label>
+            <label>
+            Hours
+            <input type="number" class="hours" min="0" max="23" value="0">
+            </label>
+            <label>
+            Minutes
+            <input type="number" class="minutes" min="0" max="59" value="0">
+            </label>
+            <label>
+            Seconds
+            <input type="number" class="seconds" min="0" max="59" value="0">
+            </label>
+        </div>
+    </template>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

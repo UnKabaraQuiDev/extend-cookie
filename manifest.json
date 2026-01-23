@@ -1,24 +1,24 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "7 Days SAML Cookies",
   "version": "1.0",
-  "description": "Fix for shitty IAM SAML",
+  "description": "Fix for shitty IAM SAML cookies",
   "permissions": [
     "cookies",
+    "storage"
+  ],
+  "host_permissions": [
     "<all_urls>"
   ],
+  "action": {
+    "default_popup": "popup.html"
+  },
   "background": {
     "scripts": ["background.js"]
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "saml-cookies@yourdomain.local",
-      "data_collection_permissions": {
-        "required": ["none"],
-        "collects_personal_data": false,
-        "collects_location_data": false,
-        "collects_web_activity": false
-      }
+      "id": "saml-cookies@kbra.lu"
     }
   }
 }
