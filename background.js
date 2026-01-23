@@ -5,22 +5,21 @@ browser.webRequest.onHeadersReceived.addListener(
     const now = Math.floor(Date.now() / 1000);
 
     const newHeaders = [];
-
-    const skipNames = [];
+    // const newCookies = {};
+    const overwritten = [];
 
     for (const header of details.responseHeaders) {
       if (header.name.toLowerCase() !== "set-cookie") {
         newHeaders.push(header);
         continue;
       }
-      console.log(header);
+      // console.log(header);
 
       const cookies = header.value.split(/\r?\n/);
-      console.log(cookies);
+      // console.log(cookies);
 
       for (const cookieStr of cookies) {
-        console.log(cookieStr);
-        // parse cookie name, value, and attributes
+        // console.log(cookieStr);
         const m = cookieStr.match(/^([^=]+)=([^;]*)(.*)$/);
         if (!m) continue;
 
@@ -34,21 +33,21 @@ browser.webRequest.onHeadersReceived.addListener(
 
         const ruleEntry = matchRuleForDomain(cookieDomain, domains);
         if (!ruleEntry) {
-          console.log("No rule", cookieName);
+          // console.log("No rule", cookieName);
           newHeaders.push({ name: "Set-Cookie", value: cookieStr });
           continue;
         }
 
         const rule = ruleEntry;
         if (!rule.enabled) {
-          console.log("Rule disabled", cookieName);
+          // console.log("Rule disabled", cookieName);
           newHeaders.push({ name: "Set-Cookie", value: cookieStr });
           continue;
         }
 
         const cookieOverride = rule.cookies?.[cookieName];
         if (cookieOverride && cookieOverride.enabled === false) {
-          console.log("Single cookie override refused", cookieName);
+          // console.log("Single cookie override refused", cookieName);
           newHeaders.push({ name: "Set-Cookie", value: cookieStr });
           continue;
         }
@@ -68,52 +67,49 @@ browser.webRequest.onHeadersReceived.addListener(
           const expDate = new Date(expiresMatch[1]);
           remaining = Math.floor(expDate.getTime() / 1000) - now;
         } else {
-          console.log("no timeout", cookieName);
-          newHeaders.push({name: "Set-Cookie", value: cookieStr});
-          continue;
+          // console.log("no timeout (session)", cookieName);
+          // newHeaders.push({ name: "Set-Cookie", value: cookieStr });
+          remaining = 0;
         }
 
         // only override if remaining < desired duration
         if (remaining >= duration) {
-          console.log("Long enough", cookieName);
+          // console.log("Long enough", cookieName);
           newHeaders.push({ name: "Set-Cookie", value: cookieStr });
           continue;
         }
 
-        if(skipNames.includes(cookieName)) {
-          console.log("skipping", cookieName);
-          continue;
-        }else {
-          console.log("first", cookieName);
-          skipNames.push(cookieName);
-        }
+        attrs = attrs.replace(/;\s*Max-Age=[^;]+/i, "");
+        attrs = attrs.replace(/;\s*Expires=[^;]+/i, "");
 
-        //if (cookieName == ""undefined"") {
-          // rebuild cookie with extended Max-Age
-          attrs = attrs.replace(/;\s*Max-Age=[^;]+/i, "");
-          attrs = attrs.replace(/;\s*Expires=[^;]+/i, "");
+        const newCookieStr = `${cookieName}=${cookieValue}${attrs}; Max-Age=${duration}`;
+        // newCookies[`${cookieDomain}:${cookieName}`] = newCookieStr;
+        newHeaders.push({ name: "Set-Cookie", value: newCookieStr });
+        // console.log("added:", newCookieStr);
 
-          const newCookieStr = `${cookieName}=${cookieValue}${attrs}; Max-Age=${duration}`;
-          newHeaders.push({ name: "Set-Cookie", value: newCookieStr });
-        // }else {
-        //   newHeaders.push({ name: "Set-Cookie", value: cookieStr });
-        // }
-
-        // log override
-        // const { logs = [] } = await browser.storage.local.get("logs");
-        // logs.push({
-        //   timestamp: new Date().toISOString(),
-        //   domain: cookieDomain,
-        //   cookie: cookieName,
-        //   previousDuration: remaining,
-        //   overwrittenDuration: duration
-        // });
-        // if (logs.length > 25) logs.splice(0, logs.length - 25);
-        // await browser.storage.local.set({ logs });
+        overwritten.push({
+          timestamp: new Date().toISOString(),
+          domain: cookieDomain,
+          cookie: cookieName,
+          previousDuration: remaining,
+          overwrittenDuration: duration
+        });
       }
     }
 
-    console.log("new:", newHeaders);
+    // console.log("new:", newHeaders);
+    // console.log("overwritten:", overwritten);
+
+    (async () => {
+      try {
+        const { logs = [] } = await browser.storage.local.get("logs");
+        logs.push(...overwritten);
+        if (logs.length > 25) logs.splice(0, logs.length - 25);
+        await browser.storage.local.set({ logs });
+      } catch (e) {
+        console.error(e);
+      }
+    })();
 
     return { responseHeaders: newHeaders };
   },
@@ -126,7 +122,7 @@ function matchRuleForDomain(cookieDomain, domains) {
 
   // exact match first
   for (const [pattern, rule] of entries) {
-  //console.log(pattern, cookieDomain);
+    //console.log(pattern, cookieDomain);
     if (pattern === cookieDomain) {
       return rule;
     }
@@ -136,7 +132,7 @@ function matchRuleForDomain(cookieDomain, domains) {
   const matches = [];
 
   for (const [pattern, rule] of entries) {
-  //console.log(pattern, cookieDomain);
+    //console.log(pattern, cookieDomain);
     if (pattern.includes("*")) {
       // escape regex chars except *
       const escaped = pattern.replace(/[-/\\^$+?.()|[\]{}]/g, "\\$&");
@@ -158,7 +154,7 @@ function matchRuleForDomain(cookieDomain, domains) {
   // pick longest pattern (more specific)
   matches.sort((a, b) => b.pattern.length - a.pattern.length);
 
-//console.log(matches[0].rule);
+  //console.log(matches[0].rule);
 
   return matches[0].rule;
 }
